@@ -19,7 +19,7 @@ from .api import get_currencies, get_trade_hist, TradesExceeded
 
 __author__ = "Florian Wilhelm"
 __copyright__ = "Florian Wilhelm"
-__license__ = "new-bsd"
+__license__ = "mit"
 
 _logger = logging.getLogger(__name__)
 
@@ -109,6 +109,35 @@ def get_trade_hist_alias(asset_pair, start, end):
             ])
     return df
 
+def get_trade_hist_alias(asset_pair, start, end):
+    """Helper function to run api.get_trade_hist
+
+    If a TradesExceeded exception is raised, it splits the timerange of
+    (start) to (end) in half and calls itself with the new timeranges.
+
+    This prevents any 'hotspots' where there is extremely high trading
+    activity in a short period of time - eg on usdt_btc
+
+    Args:
+        asset_pair: name of the asset pair
+        start (pandas.Timestamp): start of period
+        end (pandas.Timestamp): end of period
+
+    Returns:
+        pandas.DataFrame: dataframe containing trades of asset
+    """
+    original_timedelta = end - start
+    try:
+        df = get_trade_hist(asset_pair, start, end)
+    except TradesExceeded:
+        new_timedelta = original_timedelta / 2
+        df = pd.concat([
+            get_trade_hist_alias(asset_pair, start, start + new_timedelta - pd.offsets.Second()),
+            get_trade_hist_alias(asset_pair, start + new_timedelta, end)
+            ])
+    return df
+
+
 def fetch_trades(asset_pair, start, end):
     """Helper function to fetch trades for a single asset pair
 
@@ -159,6 +188,7 @@ def prepare_data(start, end, sid_map, cache):
                 trades = fetch_trades(asset_pair, start_day, end_day)
                 cache[key] = make_candle_stick(trades)
                 #print("\nFetched trades from {} to {}".format(start_day, end_day)) DEBUG
+                _logger.debug("Fetched trades from {} to {}".format(start_day, end_day))
             yield sid, cache[key]
 
 
